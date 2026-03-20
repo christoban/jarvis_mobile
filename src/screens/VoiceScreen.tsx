@@ -13,6 +13,7 @@ import {
   Animated, ScrollView, ActivityIndicator,
   Vibration,
 } from 'react-native';
+import * as Speech from 'expo-speech';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   RecordingPresets,
@@ -24,21 +25,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors, Spacing, Radius, Shadow } from '../theme';
 import { useHistoryStore } from '../store/history.store';
-
-// ── Config ────────────────────────────────────────────────────────────────────
-import { BASE_URL_EXPORT } from '../services/api.service';
-const BASE_URL     = BASE_URL_EXPORT;
-const SECRET_TOKEN = 'menedona_2005_christoban_2026';
-const DEVICE_ID    = 'NDZANA_PHONE';
-
-function headers() {
-  return {
-    'Content-Type':   'application/json',
-    'X-Jarvis-Token': SECRET_TOKEN,
-    'X-Device-Id':    DEVICE_ID,
-    'X-Timestamp':    Math.floor(Date.now() / 1000).toString(),
-  };
-}
+import { sendVoiceCommand } from '../services/api.service';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type VoiceStatus =
@@ -149,42 +136,21 @@ export function VoiceScreen() {
 
       if (!uri) throw new Error('Aucun fichier audio enregistré.');
 
-      // Lire le fichier en base64
-      const base64Audio = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // Déterminer le format
-      const fmt = uri.endsWith('.m4a') ? 'm4a'
-                : uri.endsWith('.wav') ? 'wav'
-                : uri.endsWith('.caf') ? 'caf'
-                : 'm4a';
-
       // Enregistrer dans l'historique
       const histId = uid();
       addPending(histId, '[Commande vocale]');
 
-      // Envoyer au bridge
-      const res = await fetch(`${BASE_URL}/api/voice`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({
-          audio_base64: base64Audio,
-          format:       fmt,
-          device_id:    DEVICE_ID,
-          speak:        true,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+      // Utilise le meme flux API que les commandes texte (meme auth/headers/base URL)
+      const voice = await sendVoiceCommand(uri);
+      if (!voice.ok) {
+        throw new Error(voice.error || 'Erreur serveur vocal');
       }
 
+      const data = voice.data ?? {};
+
       const success    = data.success ?? false;
-      const transcript = data.transcript ?? '';
-      const response   = data.result?.message ?? '';
+      const transcript = voice.transcript ?? data.transcript ?? '';
+      const response   = data.result?.message ?? data.message ?? '';
 
       updateEntry(histId, {
         status:   success ? 'done' : 'error',
@@ -194,6 +160,19 @@ export function VoiceScreen() {
 
       setResult({ transcript, response, success, timings: data.timings });
       setStatus('done');
+
+      if (success && response?.trim()) {
+        try {
+          Speech.stop();
+          Speech.speak(response.trim(), {
+            language: 'fr-FR',
+            rate: 1.0,
+            pitch: 1.0,
+          });
+        } catch {
+          // Ignore TTS playback errors to keep command flow successful.
+        }
+      }
 
       Vibration.vibrate(success ? [0, 30, 50, 30] : [0, 80, 40, 80]);
 

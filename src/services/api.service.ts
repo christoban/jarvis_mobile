@@ -5,7 +5,7 @@
  * MODE CLOUD  : via Azure Function (Semaine 8)
  *
  * ⚙️  POUR CHANGER DE MODE :
- *     Modifie USE_LOCAL_BRIDGE ci-dessous.
+ *     Modifie BRIDGE_MODE ci-dessous.
  *
  * En mode local, l'app tente de détecter automatiquement le bridge Jarvis.
  */
@@ -14,7 +14,21 @@
 //  ⚙️  CONFIGURATION — À MODIFIER SELON TON ENVIRONNEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-const USE_LOCAL_BRIDGE = true;  // true = WiFi local | false = Azure cloud
+type BridgeMode = 'local' | 'azure';
+
+// Choix rapide du mode de dev:
+// - 'local'     : meme WiFi (detection auto IP + fallback)
+// - 'azure'     : backend cloud Azure
+const BRIDGE_MODE: BridgeMode = 'local';
+
+// Optionnel: surcharge via variable Expo (EXPO_PUBLIC_BRIDGE_MODE=local|azure)
+const BRIDGE_MODE_ENV = String(process?.env?.EXPO_PUBLIC_BRIDGE_MODE || '').trim().toLowerCase();
+const ACTIVE_BRIDGE_MODE: BridgeMode =
+  BRIDGE_MODE_ENV === 'local'
+    ? 'local'
+    : BRIDGE_MODE_ENV === 'azure'
+      ? 'azure'
+        : BRIDGE_MODE;
 
 // Fallback manuel si la détection auto échoue
 const LOCAL_PC_IP_FALLBACK = '10.183.57.205';
@@ -22,9 +36,7 @@ const LOCAL_PC_IP_FALLBACK = '10.183.57.205';
 const LOCAL_PORT  = 7071;
 const AZURE_URL   = 'https://jarvis-windows-fn.azurewebsites.net';
 
-const BASE_URL_FALLBACK = USE_LOCAL_BRIDGE
-  ? `http://${LOCAL_PC_IP_FALLBACK}:${LOCAL_PORT}`
-  : AZURE_URL;
+const BASE_URL_FALLBACK = `http://${LOCAL_PC_IP_FALLBACK}:${LOCAL_PORT}`;
 
 let _resolvedBaseUrl: string | null = null;
 
@@ -92,7 +104,9 @@ async function probeBridge(baseUrl: string): Promise<boolean> {
 }
 
 async function getBaseUrl(forceRefresh = false): Promise<string> {
-  if (!USE_LOCAL_BRIDGE) return AZURE_URL;
+  if (ACTIVE_BRIDGE_MODE === 'azure') return AZURE_URL;
+
+  // Mode local: détection auto (LAN)
   if (!forceRefresh && _resolvedBaseUrl) return _resolvedBaseUrl;
 
   const candidates = getLocalCandidates();
@@ -116,7 +130,9 @@ const SECRET_TOKEN = 'menedona_2005_christoban_2026';
 const DEVICE_ID    = 'NDZANA_PHONE';
 
 export const API_CONFIG = {
-  BASE_URL: BASE_URL_FALLBACK,
+  BASE_URL: ACTIVE_BRIDGE_MODE === 'azure'
+    ? AZURE_URL
+    : BASE_URL_FALLBACK,
   SECRET_TOKEN,
   DEVICE_ID,
 };
@@ -312,10 +328,10 @@ export async function checkHealth(): Promise<{
   ok: boolean;
   online: boolean;
   data?: any;
-  mode: 'local' | 'cloud';
+  mode: BridgeMode;
   error?: string;
 }> {
-  const mode = USE_LOCAL_BRIDGE ? 'local' : 'cloud';
+  const mode = ACTIVE_BRIDGE_MODE;
   try {
     const baseUrl = await getBaseUrl(true);
     const res = await fetch(`${baseUrl}/api/health`, {
@@ -375,9 +391,10 @@ export async function getNotifications(limit: number = 20): Promise<{
 // ─────────────────────────────────────────────────────────────────────────────
 export function getCurrentMode(): string {
   const active = _resolvedBaseUrl || BASE_URL_FALLBACK;
-  return USE_LOCAL_BRIDGE
-    ? `Local WiFi — ${active}`
-    : `Azure Cloud — ${AZURE_URL}`;
+  if (ACTIVE_BRIDGE_MODE === 'azure') {
+    return `Azure Cloud — ${AZURE_URL}`;
+  }
+  return `Local WiFi — ${active}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,7 +453,7 @@ export async function sendVoiceCommand(
         audio_base64: base64,
         format,
         device_id: DEVICE_ID,
-        speak:     true,   // Le PC prononce la réponse
+        speak:     false,  // Le telephone prononcera la reponse
       }),
     });
 
@@ -457,6 +474,3 @@ export async function sendVoiceCommand(
     return { ok: false, error: e?.message || 'Erreur réseau' };
   }
 }
-
-// Export pour VoiceScreen
-export const BASE_URL_EXPORT = BASE_URL_FALLBACK;
