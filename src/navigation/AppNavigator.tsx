@@ -1,8 +1,7 @@
 /**
- * AppNavigator.tsx — Navigation principale (onglets du bas)
- * SEMAINE 8 : 4 onglets — Commande | Chat | Vocal | Historique
+ * AppNavigator.tsx — Navigation principale (5 onglets)
+ * Semaine 4 — Ajout de l'onglet MUSIQUE
  */
-
 import React from 'react';
 import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -10,6 +9,7 @@ import { HomeScreen }    from '../screens/HomeScreen';
 import { SMSModeScreen } from '../screens/SMSModeScreen';
 import { VoiceScreen }   from '../screens/VoiceScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
+import { MusicScreen }   from '../screens/MusicScreen';
 import { Colors, Spacing } from '../theme';
 import { useNotificationsStore } from '../store/notifications.store';
 
@@ -35,19 +35,19 @@ export function AppNavigator() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor:  Colors.bgCard,
-          borderTopColor:   Colors.border,
-          borderTopWidth:   1,
-          height:           64,
-          paddingBottom:    Spacing.sm,
+          backgroundColor: Colors.bgCard,
+          borderTopColor:  Colors.border,
+          borderTopWidth:  1,
+          height:          64,
+          paddingBottom:   Spacing.sm,
         },
         tabBarActiveTintColor:   Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarLabelStyle: {
           fontSize:      9,
           letterSpacing: 2,
-          fontWeight:   '600',
-          marginTop:    -2,
+          fontWeight:    '600',
+          marginTop:     -2,
         },
       }}
     >
@@ -73,6 +73,15 @@ export function AppNavigator() {
         options={{
           tabBarLabel: 'VOCAL',
           tabBarIcon: ({ focused }) => <Icon glyph="◉" focused={focused} />,
+        }}
+      />
+      {/* Semaine 4 — Onglet Musique */}
+      <Tab.Screen
+        name="Musique"
+        component={MusicScreen}
+        options={{
+          tabBarLabel: 'MUSIQUE',
+          tabBarIcon: ({ focused }) => <Icon glyph="♫" focused={focused} />,
         }}
       />
       <Tab.Screen

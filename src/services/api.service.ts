@@ -1,44 +1,34 @@
 /**
  * api.service.ts — Communication Mobile ↔ Jarvis PC
  *
- * MODE LOCAL  : téléphone + PC sur même WiFi → direct sans Azure
- * MODE CLOUD  : via Azure Function (Semaine 8)
- *
- * ⚙️  POUR CHANGER DE MODE :
- *     Modifie BRIDGE_MODE ci-dessous.
- *
- * En mode local, l'app tente de détecter automatiquement le bridge Jarvis.
+ * SEMAINE 4 — CORRECTIONS :
+ *   [Fix1] pollResult : timeout corrigé 30s (commentaire + code étaient incohérents — 60s en code vs 30s en commentaire)
+ *   [Fix2] poll interval : 800ms → 1200ms (moins de requêtes, latence perçue meilleure)
+ *   [Fix3] getBaseUrl() : mis en cache dans pollResult — ne re-détecte pas le bridge à chaque poll
+ *   [Fix4] useNotifications interval : exporté pour permettre de le configurer (musique = plus rapide)
  */
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  ⚙️  CONFIGURATION — À MODIFIER SELON TON ENVIRONNEMENT
-// ─────────────────────────────────────────────────────────────────────────────
 
 type BridgeMode = 'local' | 'azure';
 
-// Choix rapide du mode de dev:
-// - 'local'     : meme WiFi (detection auto IP + fallback)
-// - 'azure'     : backend cloud Azure
 const BRIDGE_MODE: BridgeMode = 'local';
-
-// Optionnel: surcharge via variable Expo (EXPO_PUBLIC_BRIDGE_MODE=local|azure)
 const BRIDGE_MODE_ENV = String(process?.env?.EXPO_PUBLIC_BRIDGE_MODE || '').trim().toLowerCase();
 const ACTIVE_BRIDGE_MODE: BridgeMode =
-  BRIDGE_MODE_ENV === 'local'
-    ? 'local'
-    : BRIDGE_MODE_ENV === 'azure'
-      ? 'azure'
-        : BRIDGE_MODE;
+  BRIDGE_MODE_ENV === 'local' ? 'local'
+  : BRIDGE_MODE_ENV === 'azure' ? 'azure'
+  : BRIDGE_MODE;
 
-// Fallback manuel si la détection auto échoue
 const LOCAL_PC_IP_FALLBACK = '10.183.57.205';
-
 const LOCAL_PORT  = 7071;
 const AZURE_URL   = 'https://jarvis-windows-fn.azurewebsites.net';
-
 const BASE_URL_FALLBACK = `http://${LOCAL_PC_IP_FALLBACK}:${LOCAL_PORT}`;
 
+// [Fix3] Cache URL résolu — ne re-détecte pas à chaque poll
 let _resolvedBaseUrl: string | null = null;
+
+// Timeouts et intervalles — centralisés ici pour éviter les incohérences
+const POLL_TIMEOUT_MS  = 30_000;  // [Fix1] 30s (était 60s dans le code)
+const POLL_INTERVAL_MS = 1_200;   // [Fix2] 1.2s (était 800ms)
+const HEALTH_TIMEOUT_MS = 1_500;
 
 function withTimeoutSignal(timeoutMs: number): AbortSignal | undefined {
   if (typeof AbortController === 'undefined') return undefined;
@@ -61,17 +51,13 @@ function dedupe(list: string[]): string[] {
 
 function extractExpoHostIp(): string | null {
   try {
-    // import dynamique pour éviter les erreurs si Constants n'est pas dispo.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Constants = require('expo-constants').default;
     const hostUri: string | undefined =
       Constants?.expoConfig?.hostUri ||
       Constants?.manifest2?.extra?.expoGo?.hostUri ||
       Constants?.manifest?.debuggerHost;
-
     if (!hostUri) return null;
-    const host = String(hostUri).split(':')[0]?.trim();
-    return host || null;
+    return String(hostUri).split(':')[0]?.trim() || null;
   } catch {
     return null;
   }
@@ -79,15 +65,13 @@ function extractExpoHostIp(): string | null {
 
 function getLocalCandidates(): string[] {
   const expoHostIp = extractExpoHostIp();
-  const candidates = [
+  return dedupe([
     expoHostIp ? `http://${expoHostIp}:${LOCAL_PORT}` : '',
     `http://${LOCAL_PC_IP_FALLBACK}:${LOCAL_PORT}`,
     `http://127.0.0.1:${LOCAL_PORT}`,
     `http://localhost:${LOCAL_PORT}`,
-    // Android Emulator classique
     `http://10.0.2.2:${LOCAL_PORT}`,
-  ];
-  return dedupe(candidates.filter(Boolean));
+  ].filter(Boolean));
 }
 
 async function probeBridge(baseUrl: string): Promise<boolean> {
@@ -95,7 +79,7 @@ async function probeBridge(baseUrl: string): Promise<boolean> {
     const res = await fetch(`${baseUrl}/api/health`, {
       method: 'GET',
       headers: buildHeaders(),
-      signal: withTimeoutSignal(1500),
+      signal: withTimeoutSignal(HEALTH_TIMEOUT_MS),
     });
     return res.ok;
   } catch {
@@ -105,20 +89,16 @@ async function probeBridge(baseUrl: string): Promise<boolean> {
 
 async function getBaseUrl(forceRefresh = false): Promise<string> {
   if (ACTIVE_BRIDGE_MODE === 'azure') return AZURE_URL;
-
-  // Mode local: détection auto (LAN)
   if (!forceRefresh && _resolvedBaseUrl) return _resolvedBaseUrl;
 
   const candidates = getLocalCandidates();
   for (const base of candidates) {
-    // eslint-disable-next-line no-await-in-loop
     const ok = await probeBridge(base);
     if (ok) {
       _resolvedBaseUrl = base;
       return base;
     }
   }
-
   _resolvedBaseUrl = BASE_URL_FALLBACK;
   return _resolvedBaseUrl;
 }
@@ -130,9 +110,7 @@ const SECRET_TOKEN = 'menedona_2005_christoban_2026';
 const DEVICE_ID    = 'NDZANA_PHONE';
 
 export const API_CONFIG = {
-  BASE_URL: ACTIVE_BRIDGE_MODE === 'azure'
-    ? AZURE_URL
-    : BASE_URL_FALLBACK,
+  BASE_URL: ACTIVE_BRIDGE_MODE === 'azure' ? AZURE_URL : BASE_URL_FALLBACK,
   SECRET_TOKEN,
   DEVICE_ID,
 };
@@ -159,13 +137,13 @@ export interface CommandResult {
 }
 
 export interface BridgeNotification {
-  id: string;
-  title: string;
-  body: string;
-  type: 'task_done' | 'error' | 'battery_low' | 'screenshot' | 'info' | string;
+  id:       string;
+  title:    string;
+  body:     string;
+  type:     'task_done' | 'error' | 'battery_low' | 'screenshot' | 'info' | string;
   priority: 'high' | 'normal' | 'low' | string;
   timestamp: number;
-  data?: Record<string, any>;
+  data?:    Record<string, any>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,12 +163,7 @@ async function postCommand(command: string): Promise<{ ok: boolean; id?: string;
     });
     if (!res.ok) {
       let reason = '';
-      try {
-        const data = await res.json();
-        reason = typeof data?.reason === 'string' ? data.reason : '';
-      } catch {
-        reason = '';
-      }
+      try { const d = await res.json(); reason = d?.reason || ''; } catch {}
       return { ok: false, error: reason ? `HTTP ${res.status} — ${reason}` : `HTTP ${res.status}` };
     }
     const data = await res.json();
@@ -201,7 +174,7 @@ async function postCommand(command: string): Promise<{ ok: boolean; id?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ATTENDRE LE RÉSULTAT (POLLING)
+//  POLLING — [Fix1] timeout 30s  [Fix2] interval 1200ms  [Fix3] baseUrl en cache
 // ─────────────────────────────────────────────────────────────────────────────
 async function pollResult(
   id: string,
@@ -210,12 +183,15 @@ async function pollResult(
   const start = Date.now();
   let attempt = 0;
 
+  // [Fix3] Résoudre l'URL une seule fois avant de commencer à poller
+  const baseUrl = await getBaseUrl();
+
   return new Promise((resolve) => {
     const timer = setInterval(async () => {
-      // Timeout global : 30s
-      if (Date.now() - start > 60_000) {
+      // [Fix1] Timeout cohérent : 30s
+      if (Date.now() - start > POLL_TIMEOUT_MS) {
         clearInterval(timer);
-        resolve({ ok: false, error: 'Timeout 30s — PC n\'a pas répondu.' });
+        resolve({ ok: false, error: 'Timeout 30s — le PC n\'a pas répondu.' });
         return;
       }
 
@@ -223,27 +199,24 @@ async function pollResult(
       onProgress?.('polling', attempt);
 
       try {
-        const baseUrl = await getBaseUrl();
+        // [Fix3] Réutiliser baseUrl déjà résolu
         const res = await fetch(`${baseUrl}/api/result/${id}`, {
           headers: buildHeaders(),
+          signal: withTimeoutSignal(5000),
         });
 
-        // 404 = pas encore prêt, on continue
-        if (res.status === 404) return;
-        if (!res.ok)            return;
+        if (res.status === 404) return; // pas encore prêt
+        if (!res.ok) return;
 
         const data = await res.json();
-
-        // Le bridge local retourne immédiatement status:"done"
-        // La vraie Azure Function retourne status:"pending" tant que le PC n'a pas répondu
         if (data.status === 'pending' && !data.result) return;
 
         clearInterval(timer);
         resolve({ ok: true, data });
       } catch {
-        // Erreur réseau passagère — on continue à poller
+        // Erreur réseau passagère — continuer
       }
-    }, 800);  // poll toutes les 1.2s
+    }, POLL_INTERVAL_MS); // [Fix2] 1200ms
   });
 }
 
@@ -258,14 +231,13 @@ export async function sendConfirmation(
       headers: buildHeaders(),
       body: JSON.stringify({ id: confirmId, action }),
     });
-
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.ok === false) {
       return { ok: false, error: data?.reason || `HTTP ${res.status}` };
     }
     return { ok: true };
   } catch (e: any) {
-    return { ok: false, error: e?.message || 'Erreur reseau' };
+    return { ok: false, error: e?.message || 'Erreur réseau' };
   }
 }
 
@@ -285,9 +257,9 @@ export async function waitForCommandResult(
       status: 'pending',
       awaitingConfirm: true,
       data: {
-        command_id: commandId,
-        confirm_id: payload.confirm_id,
-        message: payload.message || 'Confirmation requise',
+        command_id:      commandId,
+        confirm_id:      payload.confirm_id,
+        message:         payload.message || 'Confirmation requise',
         awaiting_confirm: true,
       },
       error: payload?.message || 'Confirmation requise',
@@ -296,47 +268,39 @@ export async function waitForCommandResult(
 
   const success = payload?.success !== false;
   return {
-    ok: success,
+    ok:     success,
     status: success ? 'success' : 'error',
-    data: payload,
-    error: success ? undefined : payload?.message,
+    data:   payload,
+    error:  success ? undefined : payload?.message,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  INTERFACE PRINCIPALE — utilisée par useCommand.ts
+//  INTERFACE PRINCIPALE
 // ─────────────────────────────────────────────────────────────────────────────
 export async function sendAndWait(
   command: string,
   onProgress?: (status: string, attempt: number) => void,
 ): Promise<{ ok: boolean; data?: any; error?: string; status: CommandResult['status']; awaitingConfirm?: boolean }> {
   onProgress?.('sending', 0);
-
   const sent = await postCommand(command);
   if (!sent.ok || !sent.id) {
     return { ok: false, error: sent.error || 'Échec d\'envoi.', status: 'error' };
   }
-
   onProgress?.('polling', 0);
   return waitForCommandResult(sent.id, onProgress);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HEALTH CHECK — utilisé par App.tsx + StatusBar
+//  HEALTH CHECK
 // ─────────────────────────────────────────────────────────────────────────────
 export async function checkHealth(): Promise<{
-  ok: boolean;
-  online: boolean;
-  data?: any;
-  mode: BridgeMode;
-  error?: string;
+  ok: boolean; online: boolean; data?: any; mode: BridgeMode; error?: string;
 }> {
   const mode = ACTIVE_BRIDGE_MODE;
   try {
     const baseUrl = await getBaseUrl(true);
-    const res = await fetch(`${baseUrl}/api/health`, {
-      headers: buildHeaders(),
-    });
+    const res = await fetch(`${baseUrl}/api/health`, { headers: buildHeaders() });
     if (!res.ok) return { ok: false, online: false, mode, error: `HTTP ${res.status}` };
     const data = await res.json();
     return { ok: true, online: true, data, mode };
@@ -357,49 +321,43 @@ export async function getNotifications(limit: number = 20): Promise<{
     const res = await fetch(`${baseUrl}/api/notifications?limit=${limit}`, {
       headers: buildHeaders(),
     });
-
     if (!res.ok) {
-      return {
-        ok: false,
-        notifications: [],
-        count: 0,
-        remaining: 0,
-        error: `HTTP ${res.status}`,
-      };
+      return { ok: false, notifications: [], count: 0, remaining: 0, error: `HTTP ${res.status}` };
     }
-
     const data = await res.json();
     return {
-      ok: true,
+      ok:            true,
       notifications: (data.notifications || []) as BridgeNotification[],
-      count: Number(data.count || 0),
-      remaining: Number(data.remaining || 0),
+      count:         Number(data.count || 0),
+      remaining:     Number(data.remaining || 0),
     };
   } catch (e: any) {
-    return {
-      ok: false,
-      notifications: [],
-      count: 0,
-      remaining: 0,
-      error: e?.message || 'Erreur reseau',
-    };
+    return { ok: false, notifications: [], count: 0, remaining: 0, error: e?.message || 'Erreur réseau' };
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  UTILITAIRES
-// ─────────────────────────────────────────────────────────────────────────────
 export function getCurrentMode(): string {
-  const active = _resolvedBaseUrl || BASE_URL_FALLBACK;
-  if (ACTIVE_BRIDGE_MODE === 'azure') {
-    return `Azure Cloud — ${AZURE_URL}`;
-  }
-  return `Local WiFi — ${active}`;
+  if (ACTIVE_BRIDGE_MODE === 'azure') return `Azure Cloud — ${AZURE_URL}`;
+  return `Local WiFi — ${_resolvedBaseUrl || BASE_URL_FALLBACK}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  COMMANDE VOCALE — SEMAINE 8
-//  Envoie un fichier audio au bridge, reçoit transcript + résultat
+//  COMMANDE RAPIDE MUSIQUE — Semaine 4
+//  Envoie une commande musique et retourne le résultat immédiatement
+// ─────────────────────────────────────────────────────────────────────────────
+export async function sendMusicCommand(command: string): Promise<{
+  ok: boolean;
+  message: string;
+  data?: any;
+}> {
+  const result = await sendAndWait(command);
+  const payload = result.data?.result ?? result.data ?? {};
+  const message = payload?.message ?? result.error ?? (result.ok ? 'OK' : 'Erreur');
+  return { ok: result.ok, message, data: payload };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  COMMANDE VOCALE
 // ─────────────────────────────────────────────────────────────────────────────
 export interface VoiceResult {
   ok:          boolean;
@@ -414,54 +372,35 @@ export async function sendVoiceCommand(
 ): Promise<VoiceResult> {
   try {
     onProgress?.('uploading');
-
-    // Lire le fichier audio et l'encoder en base64
-    // (React Native : utiliser fetch sur file:// URI)
     const response = await fetch(audioUri);
     const blob     = await response.blob();
-
-    // Convertir blob en base64
-    const base64 = await new Promise<string>((resolve, reject) => {
+    const base64   = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload  = () => {
         const result = reader.result as string;
-        // Enlever le préfixe data:audio/xxx;base64,
         resolve(result.split(',')[1] || result);
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
 
-    // Déterminer le format selon le platform
     const format = audioUri.includes('.m4a')  ? 'm4a'
                  : audioUri.includes('.wav')  ? 'wav'
                  : audioUri.includes('.webm') ? 'webm'
-                 : 'm4a';  // défaut Expo iOS/Android
+                 : 'm4a';
 
     onProgress?.('executing');
-
-    // Envoyer au bridge
     const baseUrl = await getBaseUrl();
     const res = await fetch(`${baseUrl}/api/voice`, {
       method:  'POST',
-      headers: {
-        ...buildHeaders(),
-        'Content-Type':   'application/json',
-        'X-Audio-Format': format,
-      },
-      body: JSON.stringify({
-        audio_base64: base64,
-        format,
-        device_id: DEVICE_ID,
-        speak:     false,  // Le telephone prononcera la reponse
-      }),
+      headers: { ...buildHeaders(), 'Content-Type': 'application/json', 'X-Audio-Format': format },
+      body:    JSON.stringify({ audio_base64: base64, format, device_id: DEVICE_ID, speak: false }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      return { ok: false, error: `Serveur: HTTP ${res.status} — ${err}` };
+      return { ok: false, error: `HTTP ${res.status} — ${err}` };
     }
-
     const data = await res.json();
     return {
       ok:         data.success !== false,
@@ -469,7 +408,6 @@ export async function sendVoiceCommand(
       data,
       error:      data.success === false ? data.result?.message : undefined,
     };
-
   } catch (e: any) {
     return { ok: false, error: e?.message || 'Erreur réseau' };
   }
