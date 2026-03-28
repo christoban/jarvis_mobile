@@ -1,5 +1,5 @@
 /**
- * AppNavigator.tsx — Navigation principale (5 onglets)
+ * AppNavigator.tsx — Navigation principale (6 onglets)
  * Semaine 4 — Ajout de l'onglet MUSIQUE
  */
 import React from 'react';
@@ -10,6 +10,7 @@ import { SMSModeScreen } from '../screens/SMSModeScreen';
 import { VoiceScreen }   from '../screens/VoiceScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { MusicScreen }   from '../screens/MusicScreen';
+import { ScreenShareScreen } from '../screens/ScreenSharescreen';
 import { Colors, Spacing } from '../theme';
 import { useNotificationsStore } from '../store/notifications.store';
 
@@ -82,6 +83,14 @@ export function AppNavigator() {
         options={{
           tabBarLabel: 'MUSIQUE',
           tabBarIcon: ({ focused }) => <Icon glyph="♫" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="Ecran"
+        component={ScreenShareScreen}
+        options={{
+          tabBarLabel: 'ECRAN',
+          tabBarIcon: ({ focused }) => <Icon glyph="▣" focused={focused} />,
         }}
       />
       <Tab.Screen
